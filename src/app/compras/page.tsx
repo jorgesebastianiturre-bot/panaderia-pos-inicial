@@ -20,6 +20,7 @@ export default function ComprasPage() {
   const [compras,     setCompras]   = useState<any[]>([]);
   const [proveedores, setProvs]     = useState<Proveedor[]>([]);
   const [productos,   setProductos] = useState<Producto[]>([]);
+  const [busqCompra,  setBusqCompra]  = useState('');
   const [modal,       setModal]     = useState(false);
   const [editandoCompra, setEditandoCompra] = useState<any | null>(null);
   const [cargando,    setCargando]  = useState(false);
@@ -223,8 +224,25 @@ export default function ComprasPage() {
         </button>
       </div>
 
+      <div className="relative">
+        <input className="input pl-8 text-sm" placeholder="Buscar por proveedor, artículo, fecha o forma de pago..."
+          value={busqCompra} onChange={e => setBusqCompra(e.target.value)}/>
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-pan-600" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        {busqCompra && <button onClick={() => setBusqCompra('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-pan-600 text-xs">✕</button>}
+      </div>
+
       <div className="space-y-2">
-        {compras.map((c: any) => (
+        {compras.filter((c: any) => {
+          if (!busqCompra.trim()) return true;
+          const q = busqCompra.toLowerCase();
+          const items = Array.isArray(c.items) ? c.items : [];
+          return (
+            c.proveedores?.nombre?.toLowerCase().includes(q) ||
+            c.forma_pago?.toLowerCase().includes(q) ||
+            new Date(c.fecha).toLocaleDateString('es-AR').includes(q) ||
+            items.some((i: any) => i.nombre?.toLowerCase().includes(q))
+          );
+        }).map((c: any) => (
           <div key={c.id} className="card-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
