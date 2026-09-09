@@ -185,8 +185,32 @@ export default function AdminPage() {
     );
   }
 
+  async function recalcularStocks() {
+    if (!confirm('¿Recalcular todos los stocks desde los movimientos?\nEsto sincroniza el stock con todas las ventas y producciones registradas.')) return;
+    setCargando(true);
+    const { data, error } = await supabase.rpc('recalcular_todos_los_stocks');
+    if (error) { toast.error('Error: ' + error.message); setCargando(false); return; }
+    toast.success(`✓ Stocks recalculados`);
+    setCargando(false);
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-4 pb-24 md:pb-4 space-y-6">
+      {/* Mantenimiento de stock */}
+      <div className="card border-amber-700/30 bg-amber-900/10 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🔧</span>
+          <div>
+            <p className="text-pan-200 font-medium">Sincronizar stocks</p>
+            <p className="text-pan-600 text-xs">Recalcula el stock de todos los productos desde los movimientos registrados</p>
+          </div>
+        </div>
+        <button onClick={recalcularStocks} disabled={cargando}
+          className="btn-secondary w-full btn-sm gap-2 disabled:opacity-40">
+          🔄 {cargando ? 'Recalculando...' : 'Recalcular stocks desde movimientos'}
+        </button>
+      </div>
+
       {/* Acceso rápido a categorías */}
       <a href="/admin/categorias"
         className="card flex items-center gap-3 hover:border-pan-600 transition-colors cursor-pointer">

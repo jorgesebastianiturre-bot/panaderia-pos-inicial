@@ -86,16 +86,24 @@ export default function ProduccionPage() {
     const { data: turnoActivo } = await supabase.from('turnos')
       .select('id').eq('estado', 'ABIERTO').limit(1).maybeSingle();
 
-    for (const item of itemsTanda) {
-      const { data: prod } = await supabase.from('productos').select('stock').eq('id', item.producto_id).maybeSingle();
-      const nuevoStock = (prod?.stock ?? 0) + item.cantidad;
-      await supabase.from('productos').update({ stock: nuevoStock }).eq('id', item.producto_id);
-      await supabase.from('movimientos_stock').insert({
-        id: genId('m'), producto_id: item.producto_id, tipo: 'HORNEADO',
-        cantidad: item.cantidad, fecha: fechaTs, usuario_id: usuario.id,
+    // Usar RPC atómica — igual que realizar_venta, evita desincronización
+    const { data, error } = await supabase.rpc('registrar_produccion', {
+      p_tanda: {
+        lote_id: loteId,
         turno_id: turnoActivo?.id ?? null,
-        notas: `Lote ${loteId}${notas ? ' · ' + notas : ''}`,
-      });
+        usuario_id: usuario.id,
+        fecha: fechaTs,
+        notas: notas || '',
+        items: itemsTanda.map(item => ({
+          producto_id: item.producto_id,
+          cantidad: item.cantidad,
+        })),
+      },
+    });
+
+    if (error || !data?.ok) {
+      toast.error(data?.error ?? error?.message ?? 'Error al registrar producción');
+      setCargando(false); return;
     }
     toast.success(`✓ Tanda registrada — ${itemsTanda.length} producto${itemsTanda.length !== 1 ? 's' : ''}`);
     setItemsTanda([]); setNotas(''); setBusq(''); setProdSel(null); setCantInput('');
