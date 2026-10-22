@@ -232,11 +232,16 @@ export default function VentasPage() {
     else window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   }
 
-  // ── Label legible para un turno ───────────────────────────────────────────
+  // ── Label para el dropdown de turno: solo tipo + fecha (sin estado) ─────────
+  // Ejemplo: "🌅 Mañana 20/10" o "🌆 Tarde 20/10 (abierto)"
   function labelTurno(t: any) {
+    if (!t?.tipo) return '';
     const tipo = t.tipo === 'MANIANA' ? '🌅 Mañana' : '🌆 Tarde';
-    const est  = t.estado === 'ABIERTO' ? ' ✓' : '';
-    return `${tipo} — ${t.fecha}${est}`;
+    // Formatear fecha corta: "2026-10-20" → "20/10"
+    const partes = (t.fecha ?? '').split('-');
+    const fechaCorta = partes.length === 3 ? `${partes[2]}/${partes[1]}` : t.fecha;
+    const abierto = t.estado === 'ABIERTO' ? ' (abierto)' : '';
+    return `${tipo} ${fechaCorta}${abierto}`;
   }
 
   const noAnuladas = filtradas.filter((v) => !v.anulada).length;
@@ -344,12 +349,10 @@ export default function VentasPage() {
       <div className="card">
         <h3 className="font-medium text-pan-300 text-sm mb-3">
           {noAnuladas} venta{noAnuladas !== 1 ? 's' : ''}
-          {turnoFiltro
-            ? ` — ${labelTurno(turnos.find((t) => t.id === turnoFiltro) ?? {})}`
-            : (fechaDesde || fechaHasta)
-              ? ' en el período'
-              : ' en total'}
-          {medioFiltro ? ` · ${labelMedio(medioFiltro)}` : ''}
+          {turnoFiltro   ? ` · Turno ${labelTurno(turnos.find((t) => t.id === turnoFiltro) ?? {})}` : ''}
+          {medioFiltro   ? ` · ${labelMedio(medioFiltro)}` : ''}
+          {(fechaDesde || fechaHasta) && !turnoFiltro ? ' · período seleccionado' : ''}
+          {!turnoFiltro && !medioFiltro && !fechaDesde && !fechaHasta ? ' en total' : ''}
         </h3>
         <div className="grid grid-cols-2 gap-2 text-sm">
           {[
