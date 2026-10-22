@@ -19,7 +19,32 @@ export default function TurnosPage() {
   const [editFecha,      setEditFecha]     = useState('');
   const [editTipo,       setEditTipo]      = useState<TipoTurno>('MANIANA');
 
-  useEffect(() => { cargarHistorial(); }, []);
+  useEffect(() => {
+    cargarHistorial();
+
+    // Suscripción realtime: si otro dispositivo abre o cierra un turno,
+    // esta página se actualiza sola sin necesidad de recargar manualmente.
+    const canal = supabase
+      .channel('turnos-page-watch')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'turnos' },
+        () => { cargarHistorial(); recargarTurnoActivo(); }
+      )
+      .subscribe();
+
+    // Recargar al volver a la pestaña (cuando el usuario bloquea/desbloquea el celular)
+    function handleVisible() {
+      if (document.visibilityState === 'visible') {
+        cargarHistorial(); recargarTurnoActivo();
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisible);
+
+    return () => {
+      canal.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisible);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function cargarHistorial() {
     const { data } = await supabase
@@ -33,19 +58,28 @@ export default function TurnosPage() {
   }
 
   async function recargarTurnoActivo() {
-    const hoy = new Date().toISOString().split('T')[0];
+    // Sin filtro de fecha: buscar simplemente el turno ABIERTO más reciente.
+    // El filtro por fecha causaba que el turno recién abierto no se encontrara
+    // si había un desfasaje de timezone o retraso de escritura en Supabase.
     const { data } = await supabase.from('turnos')
-      .select('*, usuarios(nombre, rol)').eq('estado', 'ABIERTO').eq('fecha', hoy)
-      .order('inicio', { ascending: false }).limit(1).maybeSingle();
+      .select('*, usuarios(nombre, rol)')
+      .eq('estado', 'ABIERTO')
+      .order('inicio', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     setTurno(data as Turno | null);
   }
 
   async function abrirTurno(tipo: TipoTurno) {
     if (!usuario) return;
     setCargando(true);
+    // Verificar si hay algún turno ABIERTO (de cualquier fecha) antes de abrir uno nuevo
     const { data: abiertos } = await supabase.from('turnos').select('id, fecha, tipo').eq('estado', 'ABIERTO');
     if (abiertos && abiertos.length > 0) {
-      toast.error(`Hay un turno abierto del ${abiertos[0].fecha}. Cerralo primero.`);
+      toast.error(`Ya hay un turno abierto (${abiertos[0].fecha}). Cerralo primero.`);
+      // Recargar por si el store estaba desactualizado en este dispositivo
+      await recargarTurnoActivo();
+      await cargarHistorial();
       setCargando(false); return;
     }
     const hoy = new Date().toISOString().split('T')[0];

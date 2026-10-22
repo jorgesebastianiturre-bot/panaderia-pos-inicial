@@ -1,56 +1,80 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useSesion } from '@/lib/store';
 import type { Usuario, Turno } from '@/types';
 
 export function useAppData() {
   const { setUsuario, setTurno, setCargando } = useSesion();
+  // Ref para evitar que múltiples recargas simultáneas pisoteen entre sí
+  const recargandoRef  = useRef(false);
+  const retryTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const turnoIdRef     = useRef<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
-    let canal: any = null;
+    let canal: ReturnType<typeof supabase.channel> | null = null;
 
-    // Control para evitar race conditions: si tenemos turno activo y la query
-    // devuelve null, esperamos 1.5s y volvemos a verificar antes de borrarlo
-    let turnoActualId: string | null = null;
+    /**
+     * Recarga el turno activo desde la DB.
+     * Si la query vuelve vacía y teníamos un turno (posible race condition al cerrar/abrir),
+     * esperamos 800ms y volvemos a intentar antes de limpiar el store.
+     * Si la query devuelve un turno, actualizamos inmediatamente — sin delays.
+     */
+    async function recargarTurno(origenEvento = false) {
+      // Evitar recargas simultáneas que se pisen
+      if (recargandoRef.current) return;
+      recargandoRef.current = true;
 
-    async function recargarTurno(conRetry = false) {
-      const { data } = await supabase
-        .from('turnos')
-        .select('*, usuarios(nombre, rol)')
-        .eq('estado', 'ABIERTO')
-        .order('inicio', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      try {
+        const { data } = await supabase
+          .from('turnos')
+          .select('*, usuarios(nombre, rol)')
+          .eq('estado', 'ABIERTO')
+          .order('inicio', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (data) {
-        // Turno encontrado: actualizar siempre
-        turnoActualId = data.id;
-        setTurno(data as Turno);
-      } else if (conRetry && turnoActualId) {
-        // Hay un turno en el store pero la query volvió vacía — puede ser race condition
-        // Esperar 1.5s y verificar de nuevo antes de borrar
-        setTimeout(async () => {
-          const { data: retry } = await supabase
-            .from('turnos')
-            .select('*, usuarios(nombre, rol)')
-            .eq('estado', 'ABIERTO')
-            .order('inicio', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (retry) {
-            turnoActualId = retry.id;
-            setTurno(retry as Turno);
-          } else {
-            turnoActualId = null;
-            setTurno(null);
+        if (data) {
+          // Turno encontrado: siempre actualizar de inmediato
+          // Esto cubre el caso "otro dispositivo abrió turno" → se refleja al instante
+          if (retryTimerRef.current) {
+            clearTimeout(retryTimerRef.current);
+            retryTimerRef.current = null;
           }
-        }, 1500);
-      } else {
-        // Carga inicial o cierre real confirmado
-        turnoActualId = null;
-        setTurno(null);
+          turnoIdRef.current = data.id;
+          setTurno(data as Turno);
+        } else if (origenEvento && turnoIdRef.current) {
+          // Recibimos un evento realtime pero la query volvió vacía.
+          // Puede ser race condition (la DB aún no propagó el estado).
+          // Esperar 800ms y verificar una vez más antes de limpiar.
+          if (!retryTimerRef.current) {
+            retryTimerRef.current = setTimeout(async () => {
+              retryTimerRef.current = null;
+              const { data: retry } = await supabase
+                .from('turnos')
+                .select('*, usuarios(nombre, rol)')
+                .eq('estado', 'ABIERTO')
+                .order('inicio', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              if (retry) {
+                turnoIdRef.current = retry.id;
+                setTurno(retry as Turno);
+              } else {
+                // Confirmado: el turno fue cerrado
+                turnoIdRef.current = null;
+                setTurno(null);
+              }
+            }, 800);
+          }
+        } else {
+          // Carga inicial sin turno activo, o cierre confirmado
+          turnoIdRef.current = null;
+          setTurno(null);
+        }
+      } finally {
+        recargandoRef.current = false;
       }
     }
 
@@ -68,27 +92,58 @@ export function useAppData() {
 
       if (!perfil) { setCargando(false); return; }
       setUsuario(perfil as Usuario);
-      await recargarTurno();
+
+      // Cargar turno inicial (sin lógica de retry — es carga fresca)
+      await recargarTurno(false);
       setCargando(false);
 
-      canal = supabase.channel('turno-watch').on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'turnos' },
-        // Pasar conRetry=true: si el turno desaparece en una sola query, verificar antes de borrar
-        () => { recargarTurno(true); }
-      ).subscribe();
+      // Suscripción realtime: cualquier cambio en la tabla turnos (INSERT, UPDATE, DELETE)
+      // se propaga a TODOS los dispositivos conectados en tiempo real.
+      // Así, cuando un dispositivo abre o cierra el turno, los demás se enteran al instante.
+      canal = supabase
+        .channel('turno-global-watch')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'turnos' },
+          () => { recargarTurno(true); }
+        )
+        .subscribe((status) => {
+          // Si el canal se reconecta después de una desconexión, recargar el turno
+          // para no quedarse con estado stale
+          if (status === 'SUBSCRIBED') {
+            recargarTurno(false);
+          }
+        });
     }
 
     cargar();
 
+    // Detectar cuando el usuario vuelve a la pestaña/app después de estar ausente
+    // Esto resuelve el caso "abrí el celular y quedó el estado viejo"
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        recargarTurno(false);
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // También recargar cuando la ventana recupera el foco (útil en desktop)
+    function handleFocus() {
+      recargarTurno(false);
+    }
+    window.addEventListener('focus', handleFocus);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') { setUsuario(null); setTurno(null); }
-      if (event === 'SIGNED_IN') { cargar(); }
+      if (event === 'SIGNED_OUT') { setUsuario(null); setTurno(null); turnoIdRef.current = null; }
+      if (event === 'SIGNED_IN')  { cargar(); }
     });
 
     return () => {
       canal?.unsubscribe();
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
