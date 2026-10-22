@@ -55,7 +55,8 @@ export default function VentasPage() {
   useEffect(() => {
     cargar();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fechaDesde, fechaHasta, turnoFiltro, medioFiltro]);
+  }, [fechaDesde, fechaHasta, turnoFiltro]);
+  // Nota: medioFiltro NO dispara cargar() — se filtra en memoria en el useMemo de arriba
 
   // ── Foco automático en input PIN al abrir modal ───────────────────────────
   useEffect(() => {
@@ -101,10 +102,8 @@ export default function VentasPage() {
         q = q.eq('turno_id', turnoFiltro);
       }
 
-      // Filtro por medio de pago
-      if (medioFiltro) {
-        q = q.eq('medio_pago', medioFiltro);
-      }
+      // Nota: medio_pago es un enum en PostgreSQL — NO se puede filtrar con .eq()
+      // desde el cliente sin cast explícito. Se filtra en memoria después de traer los datos.
 
       const { data, error } = await q;
       if (error) { console.error(error); toast.error('Error cargando ventas'); }
@@ -114,16 +113,27 @@ export default function VentasPage() {
     }
   }
 
-  // ── Búsqueda local por texto ──────────────────────────────────────────────
+  // ── Filtrado local (búsqueda + medio de pago — no van a la query) ─────────
   const filtradas = useMemo(() => {
-    if (!busqueda.trim()) return ventas;
-    const q = busqueda.toLowerCase();
-    return ventas.filter((v) =>
-      String(v.numero).includes(q) ||
-      v.clientes?.nombre?.toLowerCase().includes(q) ||
-      v.venta_items?.some((i: any) => i.nombre_snapshot?.toLowerCase().includes(q))
-    );
-  }, [ventas, busqueda]);
+    let resultado = ventas;
+
+    // Filtro por medio de pago (en memoria — medio_pago es enum en Postgres)
+    if (medioFiltro) {
+      resultado = resultado.filter((v) => v.medio_pago === medioFiltro);
+    }
+
+    // Búsqueda por texto
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      resultado = resultado.filter((v) =>
+        String(v.numero).includes(q) ||
+        v.clientes?.nombre?.toLowerCase().includes(q) ||
+        v.venta_items?.some((i: any) => i.nombre_snapshot?.toLowerCase().includes(q))
+      );
+    }
+
+    return resultado;
+  }, [ventas, busqueda, medioFiltro]);
 
   // ── Resumen de totales por medio ──────────────────────────────────────────
   const resumen = useMemo(() =>
