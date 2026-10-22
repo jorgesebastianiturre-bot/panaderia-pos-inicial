@@ -12,10 +12,16 @@ interface Props {
   productos:   Producto[];
   promociones: Promocion[];
   categorias:  Categoria[];
+  clientes?:   Array<{ id: string; es_mayorista?: boolean }>;
 }
 
-export function GridProductos({ productos, promociones, categorias }: Props) {
-  const { agregarItemConCantidad, agregarItemConMonto } = useCarrito();
+export function GridProductos({ productos, promociones, categorias, clientes = [] }: Props) {
+  const { agregarItemConCantidad, agregarItemConMonto, clienteId } = useCarrito();
+
+  // Determinar si el cliente seleccionado es mayorista para aplicar precios especiales
+  const clienteMayorista = clienteId
+    ? clientes.find((c) => c.id === clienteId)?.es_mayorista ?? false
+    : false;
   const supabase = createClient();
   const [busqueda,    setBus]      = useState('');
   const [catActiva,   setCat]      = useState<string | null>(null);
@@ -91,7 +97,12 @@ export function GridProductos({ productos, promociones, categorias }: Props) {
     if (montoExacto !== undefined && montoExacto > 0) {
       agregarItemConMonto(prodModal, cantidad, montoExacto);
     } else {
-      agregarItemConCantidad(prodModal, cantidad, promociones);
+      // Aplicar precio mayorista si corresponde
+      const precioOverride =
+        clienteMayorista && (prodModal as any).precio_mayorista
+          ? (prodModal as any).precio_mayorista
+          : undefined;
+      agregarItemConCantidad(prodModal, cantidad, promociones, precioOverride);
     }
     setProdModal(null);
   }
@@ -159,10 +170,22 @@ export function GridProductos({ productos, promociones, categorias }: Props) {
                   {p.nombre}
                 </p>
                 <div className="mt-2">
-                  <p className="text-pan-300 font-bold text-base leading-none">
-                    {formatPrecio(p.precio)}
-                    {p.por_peso && <span className="text-xs font-normal text-pan-600">/kg</span>}
-                  </p>
+                  {/* Mostrar precio mayorista si el cliente seleccionado es mayorista */}
+                  {clienteMayorista && (p as any).precio_mayorista ? (
+                    <>
+                      <p className="text-amber-400 font-bold text-base leading-none">
+                        {formatPrecio((p as any).precio_mayorista)}
+                        {p.por_peso && <span className="text-xs font-normal text-amber-700">/kg</span>}
+                        <span className="text-xs font-normal text-amber-700 ml-1">⭐</span>
+                      </p>
+                      <p className="text-pan-700 text-xs line-through leading-none">{formatPrecio(p.precio)}</p>
+                    </>
+                  ) : (
+                    <p className="text-pan-300 font-bold text-base leading-none">
+                      {formatPrecio(p.precio)}
+                      {p.por_peso && <span className="text-xs font-normal text-pan-600">/kg</span>}
+                    </p>
+                  )}
                   <p className={cx('text-xs mt-0.5', colorStock(p))}>{labelStock(p)}</p>
                 </div>
               </button>

@@ -98,7 +98,7 @@ export default function PosPage() {
               </button>
             </div>
           )}
-          <GridProductos productos={productos} promociones={promociones} categorias={categorias}/>
+          <GridProductos productos={productos} promociones={promociones} categorias={categorias} clientes={clientes}/>
         </div>
 
         {/* Carrito desktop */}

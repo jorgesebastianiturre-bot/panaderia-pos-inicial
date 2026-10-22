@@ -7,8 +7,19 @@ import { formatPrecio, genId, cx } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import type { Producto, Categoria, TipoProducto, Promocion } from '@/types';
 
-interface PromoForm { id?: string; cantidad: string; precio_total: string; activa: boolean; }
-function nuevaPromoForm(): PromoForm { return { cantidad: '', precio_total: '', activa: true }; }
+interface PromoForm {
+  id?:           string;
+  cantidad:      string;
+  precio_total:  string;
+  activa:        boolean;
+  fecha_inicio?: string;   // YYYY-MM-DD o vacío
+  fecha_fin?:    string;   // YYYY-MM-DD o vacío
+  stock_limite?: string;   // número o vacío
+  stock_vendido?: number;
+}
+function nuevaPromoForm(): PromoForm {
+  return { cantidad: '', precio_total: '', activa: true, fecha_inicio: '', fecha_fin: '', stock_limite: '' };
+}
 
 export default function ProductosPage() {
   const supabase = createClient();
@@ -70,21 +81,27 @@ export default function ProductosPage() {
       setForm({
         nombre:               p.nombre,
         precio:               p.precio,
+        precio_mayorista:     p.precio_mayorista ?? null,
         tipo:                 p.tipo,
         categoria_id:         p.categoria_id,
         stock:                p.stock,
         por_peso:             p.por_peso,
         activo:               p.activo,
         controla_vencimiento: p.controla_vencimiento,
+        ingreso_por_monto:    p.ingreso_por_monto ?? false,
       });
       setPrecioCosto(costos[p.id] ? String(costos[p.id]) : '');
       const promos = promosPorProd[p.id] ?? [];
       setPrecioCosto(costos[p.id] ? String(costos[p.id]) : '');
-      setPromosForm(promos.map((pr) => ({
-        id:          pr.id,
-        cantidad:    String(pr.cantidad),
+      setPromosForm(promos.map((pr: any) => ({
+        id:           pr.id,
+        cantidad:     String(pr.cantidad),
         precio_total: String(pr.precio_total),
-        activa:      pr.activa,
+        activa:       pr.activa,
+        fecha_inicio: pr.fecha_inicio  ?? '',
+        fecha_fin:    pr.fecha_fin     ?? '',
+        stock_limite: pr.stock_limite != null ? String(pr.stock_limite) : '',
+        stock_vendido: pr.stock_vendido ?? 0,
       })));
     } else {
       setEditando(null);
@@ -149,13 +166,18 @@ export default function ProductosPage() {
     if (productoId) {
       for (const pf of promosForm) {
         if (!pf.cantidad || !pf.precio_total) continue;
-        const promoData = {
+        const promoData: any = {
           producto_id:  productoId,
           tipo:         'CANTIDAD_FIJA' as const,
           cantidad:     parseFloat(pf.cantidad),
           precio_total: parseFloat(pf.precio_total),
           activa:       pf.activa,
           descripcion:  `${pf.cantidad} u. → ${formatPrecio(parseFloat(pf.precio_total))}`,
+          // Vigencia temporal
+          fecha_inicio:  pf.fecha_inicio  ? pf.fecha_inicio  : null,
+          fecha_fin:     pf.fecha_fin     ? pf.fecha_fin     : null,
+          // Stock límite (cuántas se pueden vender con este precio)
+          stock_limite:  pf.stock_limite  ? parseInt(pf.stock_limite) : null,
         };
         if (pf.id) {
           await supabase.from('promociones').update(promoData).eq('id', pf.id);
@@ -250,11 +272,18 @@ export default function ProductosPage() {
                 ⭐ Mayorista: {formatPrecio(p.precio_mayorista)}
               </span>
             )}
-            {promos.map((pr: any) => (
-              <span key={pr.id} className="text-pan-500">
-                🏷 {pr.cantidad}u → {formatPrecio(pr.precio_total)}
-              </span>
-            ))}
+            {promos.map((pr: any) => {
+              const hoy = new Date().toISOString().split('T')[0];
+              const vencida  = pr.fecha_fin && pr.fecha_fin < hoy;
+              const agotada  = pr.stock_limite != null && (pr.stock_vendido ?? 0) >= pr.stock_limite;
+              return (
+                <span key={pr.id} className={cx('text-xs', vencida || agotada ? 'text-red-500 line-through' : 'text-pan-500')}>
+                  🏷 {pr.cantidad}u → {formatPrecio(pr.precio_total)}
+                  {pr.fecha_fin && <span className="text-pan-700"> (hasta {pr.fecha_fin})</span>}
+                  {pr.stock_limite != null && <span className="text-pan-700"> ({pr.stock_vendido ?? 0}/{pr.stock_limite} vendidas)</span>}
+                </span>
+              );
+            })}
             <span className="text-pan-700">Stock: {p.stock}</span>
           </div>
         </div>
@@ -425,8 +454,34 @@ export default function ProductosPage() {
                     {pf.cantidad && pf.precio_total && (
                       <p className="text-pan-600 text-xs px-1">
                         {pf.cantidad} u. → {formatPrecio(+pf.precio_total)} · precio/u: {formatPrecio(+pf.precio_total / +pf.cantidad)}
+                        {pf.stock_limite && <span className="text-amber-600"> · Stock: {pf.stock_vendido ?? 0}/{pf.stock_limite}</span>}
                       </p>
                     )}
+
+                    {/* Vigencia temporal (opcional) */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label text-xs">Desde (opcional)</label>
+                        <input className="input text-sm" type="date"
+                          value={pf.fecha_inicio ?? ''}
+                          onChange={(e) => actualizarPromo(idx, 'fecha_inicio', e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Hasta (opcional)</label>
+                        <input className="input text-sm" type="date"
+                          value={pf.fecha_fin ?? ''}
+                          onChange={(e) => actualizarPromo(idx, 'fecha_fin', e.target.value)}/>
+                      </div>
+                    </div>
+
+                    {/* Stock límite (opcional) */}
+                    <div>
+                      <label className="label text-xs">Límite de unidades (opcional)</label>
+                      <input className="input text-sm" type="number" placeholder="Ej: 100 — dejar vacío = sin límite"
+                        value={pf.stock_limite ?? ''}
+                        onChange={(e) => actualizarPromo(idx, 'stock_limite', e.target.value)}/>
+                    </div>
+
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-2 text-sm text-pan-400 cursor-pointer">
                         <input type="checkbox" checked={pf.activa}

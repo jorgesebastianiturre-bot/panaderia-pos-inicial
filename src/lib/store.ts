@@ -32,9 +32,17 @@ export function calcPromo(
   promos: Promocion[],
   productoId: string
 ): { precio_unitario: number; subtotal: number; promo_id: string | null; promo_aplicada: boolean; promos_aplicadas: string[] } {
-  // Filtrar promos activas del producto, ordenadas de mayor a menor cantidad
+  // Fecha de hoy en formato YYYY-MM-DD para comparar con fecha_inicio / fecha_fin
+  const hoy = new Date().toISOString().split('T')[0];
+
+  // Filtrar promos activas del producto, dentro de vigencia y con stock disponible
   const promosProducto = promos
     .filter((p) => p.producto_id === productoId && p.activa && p.tipo === 'CANTIDAD_FIJA')
+    // Vigencia: fecha_inicio null = sin límite de inicio; fecha_fin null = sin vencimiento
+    .filter((p) => !(p as any).fecha_inicio || (p as any).fecha_inicio <= hoy)
+    .filter((p) => !(p as any).fecha_fin    || (p as any).fecha_fin    >= hoy)
+    // Stock límite: si hay límite, verificar que aún queden unidades
+    .filter((p) => (p as any).stock_limite == null || ((p as any).stock_vendido ?? 0) < (p as any).stock_limite)
     .sort((a, b) => b.cantidad - a.cantidad);
 
   if (promosProducto.length === 0 || cantidad <= 0) {
@@ -86,7 +94,8 @@ interface CarritoStore {
   clienteId:              string | null;
   ajuste:                 number;
   agregarItemConMonto:    (producto: Producto, kg: number, montoExacto: number) => void;
-  agregarItemConCantidad: (producto: Producto, cantidad: number, promos: Promocion[]) => void;
+  // precioOverride: si se pasa, usa ese precio en lugar del precio del producto (ej: precio mayorista)
+  agregarItemConCantidad: (producto: Producto, cantidad: number, promos: Promocion[], precioOverride?: number) => void;
   quitarItem:             (productoId: string) => void;
   cambiarCantidad:        (productoId: string, cantidad: number, precio: number, promos: Promocion[]) => void;
   setCliente:             (clienteId: string | null) => void;
@@ -127,14 +136,16 @@ export const useCarrito = create<CarritoStore>((set, get) => ({
         }],
       };
     }),
-  agregarItemConCantidad: (producto, cantidad, promos) =>
+  agregarItemConCantidad: (producto, cantidad, promos, precioOverride) =>
     set((s) => {
+      // Usar precio_mayorista si se pasó como override
+      const precio = precioOverride ?? producto.precio;
       const existe = s.items.find((i) => i.producto_id === producto.id);
-      const calc   = calcPromo(producto.precio, cantidad, promos, producto.id);
+      const calc   = calcPromo(precio, cantidad, promos, producto.id);
 
       if (existe) {
         const nuevaCantidad = +(existe.cantidad + cantidad).toFixed(3);
-        const calcNuevo = calcPromo(producto.precio, nuevaCantidad, promos, producto.id);
+        const calcNuevo = calcPromo(precio, nuevaCantidad, promos, producto.id);
         return {
           items: s.items.map((i) =>
             i.producto_id === producto.id ? { ...i, cantidad: nuevaCantidad, ...calcNuevo } : i
