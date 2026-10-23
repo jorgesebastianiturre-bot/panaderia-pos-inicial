@@ -38,7 +38,7 @@ export function ModalCobro({ onCerrar, onExito, clientes }: Props) {
   const montoEf   = parseFloat(efectivoM.replace(',', '.')) || 0;
   const montoTr   = parseFloat(transM.replace(',', '.'))    || 0;
   const sumaMixto = montoEf + montoTr;
-  const mixtoOk   = Math.abs(sumaMixto - tot) < 1;
+  const mixtoOk   = sumaMixto >= tot - 0.5;
 
   const clienteSel = clientes.find((c) => c.id === clienteId);
   const clientesFiltrados = clientes.filter((c) => c.activo)
@@ -161,7 +161,7 @@ export function ModalCobro({ onCerrar, onExito, clientes }: Props) {
                 value={ajuste !== 0 ? String(tot) : ''}
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
-                  if (!isNaN(v) && v > 0) setAjuste(v - subtotal);
+                  if (!isNaN(v) && v > 0) setAjuste(v - sub);
                   else setAjuste(0);
                 }}
               />
@@ -261,7 +261,7 @@ export function ModalCobro({ onCerrar, onExito, clientes }: Props) {
               </div>
               <div className={cx('flex justify-between text-sm px-1', mixtoOk ? 'text-green-400' : 'text-red-400')}>
                 <span>Suma: {formatPrecio(sumaMixto)}</span>
-                <span>{mixtoOk ? '✓ OK' : `Faltan ${formatPrecio(tot - sumaMixto)}`}</span>
+                <span>{mixtoOk ? '✓ OK' : `Mínimo ${formatPrecio(tot - sumaMixto)} más`}</span>
               </div>
             </div>
           )}
