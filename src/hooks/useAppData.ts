@@ -85,7 +85,9 @@ export function useAppData() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setCargando(false); return; }
 
-      const { data: perfil } = await supabase
+      // Intentar cargar el perfil. Si falla (puede ser RLS tardío o red lenta),
+      // reintentar una vez después de 1.5 segundos antes de dar error.
+      let { data: perfil } = await supabase
         .from('usuarios')
         .select('*')
         .eq('auth_id', user.id)
@@ -93,10 +95,22 @@ export function useAppData() {
         .single();
 
       if (!perfil) {
-        // El usuario está autenticado en Supabase Auth pero no tiene
-        // un perfil activo en la tabla usuarios. Cerrar sesión y avisar.
+        // Reintento: esperar 1.5s y volver a consultar
+        await new Promise((r) => setTimeout(r, 1500));
+        const { data: perfil2 } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('auth_id', user.id)
+          .eq('activo', true)
+          .single();
+        perfil = perfil2;
+      }
+
+      if (!perfil) {
+        // Después de dos intentos sigue sin encontrar perfil activo.
+        // Cerrar sesión para no quedar en estado roto.
         await supabase.auth.signOut();
-        toast.error('Tu usuario no tiene acceso al sistema. Contactá al administrador.');
+        toast.error('No se encontró tu perfil de usuario. Intentá ingresar de nuevo.');
         setCargando(false);
         return;
       }
