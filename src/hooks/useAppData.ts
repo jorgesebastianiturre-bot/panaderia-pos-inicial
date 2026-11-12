@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useSesion } from '@/lib/store';
 import type { Usuario, Turno } from '@/types';
+import toast from 'react-hot-toast';
 
 export function useAppData() {
   const { setUsuario, setTurno, setCargando } = useSesion();
@@ -90,7 +91,14 @@ export function useAppData() {
         .eq('activo', true)
         .single();
 
-      if (!perfil) { setCargando(false); return; }
+      if (!perfil) {
+        // El usuario está autenticado en Supabase Auth pero no tiene
+        // un perfil activo en la tabla usuarios. Cerrar sesión y avisar.
+        await supabase.auth.signOut();
+        toast.error('Tu usuario no tiene acceso al sistema. Contactá al administrador.');
+        setCargando(false);
+        return;
+      }
       setUsuario(perfil as Usuario);
 
       // Cargar turno inicial (sin lógica de retry — es carga fresca)
