@@ -10,6 +10,7 @@ export function useAppData() {
   // Ref para evitar que múltiples recargas simultáneas pisoteen entre sí
   const recargandoRef  = useRef(false);
   const retryTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollingRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const turnoIdRef     = useRef<string | null>(null);
 
   useEffect(() => {
@@ -122,6 +123,14 @@ export function useAppData() {
             recargarTurno(false);
           }
         });
+
+      // Polling de respaldo: cada 15 segundos verifica el turno activo.
+      // Esto garantiza que si el evento realtime se pierde (red móvil, WiFi inestable,
+      // celular que salió de sleep), el estado se sincroniza igual.
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      pollingRef.current = setInterval(() => {
+        recargarTurno(false);
+      }, 15000);
     }
 
     cargar();
@@ -152,6 +161,7 @@ export function useAppData() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      if (pollingRef.current)    clearInterval(pollingRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
