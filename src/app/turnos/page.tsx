@@ -91,16 +91,32 @@ export default function TurnosPage() {
       }
 
       // Buscar el perfil en public.usuarios usando el auth_id
-      const { data: perfil } = await supabase
-        .from('usuarios')
-        .select('id, rol, activo')
-        .eq('auth_id', user.id)
-        .eq('activo', true)
-        .single();
+      // Reintento automático por si hay latencia de red o RLS tardío
+      let perfil: { id: string; rol: string; activo: boolean } | null = null;
+      for (let intento = 0; intento < 3; intento++) {
+        const { data } = await supabase
+          .from('usuarios')
+          .select('id, rol, activo')
+          .eq('auth_id', user.id)
+          .eq('activo', true)
+          .single();
+        if (data) { perfil = data; break; }
+        if (intento < 2) await new Promise((r) => setTimeout(r, 800));
+      }
 
       if (!perfil) {
-        toast.error('No se encontró tu perfil. Recargá la página e intentá de nuevo.');
-        return;
+        // Último recurso: buscar sin filtro de activo (puede que el campo sea null)
+        const { data: perfilFallback } = await supabase
+          .from('usuarios')
+          .select('id, rol, activo')
+          .eq('auth_id', user.id)
+          .maybeSingle();
+        if (perfilFallback) {
+          perfil = perfilFallback;
+        } else {
+          toast.error('No se pudo cargar tu perfil. Verificá tu conexión y reintentá.');
+          return;
+        }
       }
 
       // Verificar si ya hay un turno ABIERTO
