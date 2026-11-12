@@ -108,9 +108,9 @@ export function useAppData() {
 
       if (!perfil) {
         // Después de dos intentos sigue sin encontrar perfil activo.
-        // Cerrar sesión para no quedar en estado roto.
-        await supabase.auth.signOut();
-        toast.error('No se encontró tu perfil de usuario. Intentá ingresar de nuevo.');
+        // Puede ser un problema temporal de red o RLS. No cerrar sesión,
+        // simplemente dejar cargando=false y el usuario verá "Sin turno activo"
+        // pero podrá seguir usando la app. Se reintentará en el próximo polling.
         setCargando(false);
         return;
       }
