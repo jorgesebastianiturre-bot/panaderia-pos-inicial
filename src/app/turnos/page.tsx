@@ -81,10 +81,29 @@ export default function TurnosPage() {
   }, [sincronizar]);
 
   async function abrirTurno(tipo: TipoTurno) {
-    if (!usuario) return;
     setCargando(true);
     try {
-      // Verificar primero en la DB (no en el store, que puede estar desactualizado)
+      // Obtener el usuario autenticado directo de Supabase Auth (no depende del store)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error('No estás autenticado. Recargá la página.');
+        return;
+      }
+
+      // Buscar el perfil en public.usuarios usando el auth_id
+      const { data: perfil } = await supabase
+        .from('usuarios')
+        .select('id, rol, activo')
+        .eq('auth_id', user.id)
+        .eq('activo', true)
+        .single();
+
+      if (!perfil) {
+        toast.error('No se encontró tu perfil. Recargá la página e intentá de nuevo.');
+        return;
+      }
+
+      // Verificar si ya hay un turno ABIERTO
       const { data: abiertos } = await supabase
         .from('turnos').select('id, fecha, tipo').eq('estado', 'ABIERTO');
 
@@ -97,14 +116,14 @@ export default function TurnosPage() {
       const hoy = new Date().toISOString().split('T')[0];
       const { error } = await supabase.from('turnos').insert({
         id: genId('t'), tipo, fecha: hoy,
-        usuario_id: usuario.id,
+        usuario_id: perfil.id,
         inicio: Date.now(),
         estado: 'ABIERTO',
         fin: null,
       });
 
       if (error) {
-        toast.error('No se pudo abrir el turno. Intentá de nuevo.');
+        toast.error(`No se pudo abrir el turno: ${error.message}`);
         return;
       }
 
